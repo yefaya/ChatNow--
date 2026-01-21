@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>🌏 ChatNow</title>
+    
+    <!-- 🔴 使用七牛云 CDN，最稳 -->
+    <script src="https://cdn.staticfile.org/socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="https://cdn.staticfile.org/marked/12.0.1/marked.min.js"></script>
+    <script src="https://cdn.staticfile.org/highlight.js/11.9.0/highlight.min.js"></script>
+    <link href="https://cdn.staticfile.org/highlight.js/11.9.0/styles/github-dark.min.css" rel="stylesheet">
+
+    <style>
+        :root {
+            --primary: #3390ec;
+            --bg-sidebar: #ffffff;
+            --bg-chat: #8CA0B3;
+            --bg-chat-pattern: #cfe6f3;
+            --bubble-me: #effdde;
+            --bubble-other: #ffffff;
+            --badge-red: #ff3b30;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; outline: none; -webkit-tap-highlight-color: transparent; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f0f2f5; height: 100vh; overflow: hidden; }
+
+        #login-screen { position: fixed; inset: 0; background: #f0f2f5; z-index: 9999; display: flex; justify-content: center; align-items: center; }
+        .login-card { background: white; padding: 40px; border-radius: 20px; width: 90%; max-width: 400px; text-align: center; box-shadow: 0 4px 20px rgba(0,0,0,0.05); }
+        .login-btn { width: 100%; padding: 15px; border-radius: 12px; border: none; cursor: pointer; background: var(--primary); color: white; font-weight: bold; margin-top: 20px; font-size: 16px; }
+
+        #main-app { display: none; height: 100vh; width: 100vw; display: flex; }
+        .sidebar { width: 320px; background: var(--bg-sidebar); border-right: 1px solid #e1e4e8; display: flex; flex-direction: column; flex-shrink: 0; transition: transform 0.3s; z-index: 20; }
+        .brand-header { padding: 20px; display: flex; align-items: center; border-bottom: 1px solid #f0f0f0; }
+        .yf-logo { width: 45px; height: 45px; background: var(--primary); color: white; border-radius: 50%; font-weight: 900; font-size: 22px; display: flex; justify-content: center; align-items: center; margin-right: 12px; }
+        .list-section { flex-grow: 1; overflow-y: auto; }
+        .section-title { padding: 15px 20px 5px; font-size: 12px; color: #999; font-weight: bold; text-transform: uppercase; }
+        
+        .chat-item { padding: 10px 20px; display: flex; align-items: center; cursor: pointer; transition: 0.2s; border-left: 3px solid transparent; position: relative; }
+        .chat-item:hover { background: #f4f4f5; }
+        .chat-item.active { background: #f0f8ff; border-left-color: var(--primary); }
+        .avatar { width: 40px; height: 40px; border-radius: 50%; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; margin-right: 12px; flex-shrink: 0; font-size: 15px; }
+        .chat-info { flex-grow: 1; overflow: hidden; }
+        .badge { background: var(--badge-red); color: white; border-radius: 12px; padding: 2px 7px; font-size: 11px; font-weight: bold; min-width: 20px; text-align: center; display: none; position: absolute; right: 15px; top: 50%; transform: translateY(-50%); }
+        .badge.show { display: block; }
+        
+        .chat-window { flex-grow: 1; display: flex; flex-direction: column; background: var(--bg-chat-pattern); position: relative; }
+        .chat-header { height: 60px; background: white; border-bottom: 1px solid #e1e4e8; display: flex; align-items: center; padding: 0 20px; justify-content: space-between; z-index: 10; }
+        #msg-container { flex-grow: 1; overflow-y: auto; padding: 10px 20px; padding-bottom: 80px; display: flex; flex-direction: column; }
+        
+        /* 紧凑 UI & 秒级时间 */
+        .msg-row { display: flex; max-width: 90%; margin-bottom: 4px; position: relative; }
+        .msg-row.chain-same { margin-bottom: 1px; } 
+        .msg-row.chain-start { margin-top: 6px; }   
+        .msg-row.me { align-self: flex-end; flex-direction: row-reverse; }
+        .msg-row.other { align-self: flex-start; }
+        
+        .bubble {
+            padding: 5px 10px 6px 10px; border-radius: 12px; position: relative;
+            font-size: 15px; line-height: 1.45; 
+            box-shadow: 0 1px 1px rgba(0,0,0,0.06);
+            word-wrap: break-word; min-width: 80px; max-width: 100%;
+        }
+        .bubble.me { background: var(--bubble-me); border-bottom-right-radius: 2px; }
+        .bubble.other { background: var(--bubble-other); border-bottom-left-radius: 2px; }
+
+        .msg-avatar {
+            width: 35px; height: 35px; border-radius: 50%; color: white;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: bold; font-size: 13px; flex-shrink: 0;
+            margin-right: 8px; align-self: flex-end; 
+        }
+        .msg-avatar.hidden { visibility: hidden; } 
+        .msg-avatar.me { display: none; }
+
+        .sender-name {
+            font-size: 12px; font-weight: 600; margin-bottom: 0px; 
+            display: block; cursor: pointer; opacity: 0.9;
+        }
+        
+        .msg-time { 
+            font-size: 9px; color: #999; float: right; 
+            margin-left: 8px; position: relative; top: 4px; 
+            user-select: none; line-height: 1;
+        }
+
+        .bubble p { margin: 0; display: inline; }
+        .bubble pre { background: #1e1e1e; color: #fff; padding: 8px; border-radius: 6px; overflow-x: auto; margin: 4px 0; font-size: 13px; display: block; }
+        .bubble code { font-family: Consolas, monospace; color: #d63384; font-size: 13px; }
+
+        .input-area { position: absolute; bottom: 0; left: 0; right: 0; background: white; padding: 8px 12px; border-top: 1px solid #e1e4e8; display: flex; align-items: center; z-index: 100; }
+        .msg-input { flex-grow: 1; padding: 10px; border-radius: 18px; border: 1px solid #ddd; background: #f9f9f9; font-size: 15px; }
+        .send-btn { width: 36px; height: 36px; border-radius: 50%; background: var(--primary); color: white; border: none; margin-left: 8px; font-size: 16px; cursor: pointer; }
+        
+        .emoji-toggle { font-size: 22px; cursor: pointer; margin-right: 8px; color: #777; transition: 0.2s; user-select: none; }
+        #emoji-picker { position: absolute; bottom: 65px; left: 15px; width: 300px; height: 200px; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); border-radius: 15px; box-shadow: 0 5px 20px rgba(0,0,0,0.15); display: none; grid-template-columns: repeat(8, 1fr); padding: 10px; overflow-y: auto; z-index: 200; }
+        #emoji-picker.show { display: grid; }
+        .emoji-item { font-size: 20px; cursor: pointer; padding: 5px; text-align: center; border-radius: 5px; user-select: none; }
+        .emoji-item:hover { background: #eee; }
+
+        #typing-indicator { position: absolute; bottom: 65px; left: 20px; background: rgba(255,255,255,0.9); padding: 6px 10px; border-radius: 15px; font-size: 11px; color: #666; box-shadow: 0 2px 10px rgba(0,0,0,0.1); display: none; align-items: center; z-index: 90; }
+        .dot { width: 5px; height: 5px; background: #888; border-radius: 50%; margin: 0 2px; animation: bounce 1.4s infinite ease-in-out both; }
+        .dot:nth-child(1) { animation-delay: -0.32s; }
+        .dot:nth-child(2) { animation-delay: -0.16s; }
+        @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+
+        #admin-panel { padding: 15px; border-top: 1px solid #eee; display: none; }
+        .reset-btn { width: 100%; padding: 10px; background: #ff4d4f; color: white; border-radius: 8px; border:none; font-weight: bold; cursor: pointer; }
+        .back-btn { display: none; font-size: 24px; margin-right: 15px; color: #777; cursor: pointer; }
+        
+        @media (max-width: 768px) {
+            .sidebar { width: 100%; position: absolute; height: 100%; }
+            .sidebar.hidden { transform: translateX(-100%); }
+            .chat-window { width: 100%; }
+            .back-btn { display: block; }
+            .msg-row { max-width: 95%; } 
+            #emoji-picker { width: 90%; left: 5%; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 登录 -->
+    <div id="login-screen">
+        <div class="login-card">
+            <div style="font-size:40px; margin-bottom:10px;">🌏</div>
+            <h2 style="color:var(--primary); margin-bottom:5px;">ChatNow</h2>
+            <p style="color:#999; margin-bottom:20px;">Stable Version</p>
+            <input type="text" id="username" class="msg-input" placeholder="Enter nickname" maxlength="15">
+            <button class="login-btn" onclick="attemptLogin()">Enter Chat</button>
+        </div>
+    </div>
+
+    <!-- 主界面 -->
+    <div id="main-app">
+        <div class="sidebar" id="sidebar">
+            <div class="brand-header">
+                <div class="yf-logo">yf</div>
+                <div class="brand-info"><h3>ChatNow</h3><p>Design by yf</p></div>
+            </div>
+            <div class="list-section">
+                <div class="section-title">PINNED</div>
+                <div class="chat-item active" data-id="ALL" onclick="switchChat('ALL', 'Class Group', 'group', this)">
+                    <div class="avatar" style="background:#0088cc;">ALL</div>
+                    <div class="chat-info"><div class="chat-name">全员大群</div><div class="chat-meta" id="group-status">Online</div></div>
+                    <div class="badge" id="badge-ALL">0</div>
+                </div>
+                <div class="chat-item" data-id="AI" onclick="switchChat('AI', 'AI Assistant', 'ai', this)">
+                    <div class="avatar" style="background:#ff885e;">🤖</div>
+                    <div class="chat-info"><div class="chat-name">AI 助手 (EVA)</div><div class="chat-meta">Bot</div></div>
+                    <div class="badge" id="badge-AI">0</div>
+                </div>
+                <div class="section-title">ONLINE</div>
+                <div id="user-list"></div>
+            </div>
+            <div id="admin-panel">
+                <button class="reset-btn" onclick="resetSystem()">⚠ Reset System</button>
+            </div>
+        </div>
+
+        <div class="chat-window">
+            <div class="chat-header">
+                <div style="display:flex; align-items:center;">
+                    <div class="back-btn" onclick="showSidebar()">←</div>
+                    <div><h3 id="chat-title" style="font-size:16px;">Class Group</h3></div>
+                </div>
+            </div>
+            
+            <div id="msg-container"></div>
+            
+            <div id="typing-indicator">
+                DeepSeek is typing <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+            </div>
+
+            <div id="emoji-picker"></div>
+
+            <div class="input-area">
+                <div class="emoji-toggle" onclick="toggleEmoji()">😊</div>
+                <input type="text" id="msg-input" class="msg-input" placeholder="Type message..." autocomplete="off">
+                <button class="send-btn" onclick="sendMessage()">➤</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        if (typeof marked !== 'undefined') {
+            marked.use({ mangle: false, headerIds: false });
+        }
+
+        const emojis = ["😀","😃","😄","😁","😆","😅","😂","🤣","😊","😇","🙂","🙃","😉","😌","😍","🥰","😘","😗","😙","😚","😋","😛","😝","😜","🤪","🤨","🧐","🤓","😎","🤩","🥳","😏","😒","😞","😔","😟","😕","🙁","☹️","😣","😖","😫","😩","🥺","😢","😭","😤","😠","😡","🤬","🤯","😳","🥵","🥶","😱","😨","😰","😥","😓","🤗","🤔","🤭","🤫","🤥","😶","😐","😑","😬","🙄","😯","👋","👌","✌️","🤞","🤟","🤘","🤙","👈","👉","👆","👍","👎","✊","👊","👏","🙌","👐","🤲","🤝","🙏","🔥","❤️","🚀","💯","✨","🎉","💩","🤡","👻","👽"];
+
+        var socket = null;
+        try { socket = io(); } catch(e) { console.error("Socket init failed"); }
+
+        var myName = "";
+        var myColor = "#" + Math.floor(Math.random()*16777215).toString(16);
+        var currentTarget = "ALL"; 
+        var currentRoomType = "group";
+        var unreadCounts = {};
+        var lastSender = null;
+
+        var picker = document.getElementById('emoji-picker');
+        emojis.forEach(function(emo) {
+            var span = document.createElement('span');
+            span.innerText = emo;
+            span.className = 'emoji-item';
+            span.onclick = function() {
+                var input = document.getElementById('msg-input');
+                input.value += emo;
+                input.focus();
+            };
+            picker.appendChild(span);
+        });
+        function toggleEmoji() { picker.classList.toggle('show'); }
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('#emoji-picker') && !e.target.closest('.emoji-toggle')) {
+                picker.classList.remove('show');
+            }
+        });
+
+        function attemptLogin() {
+            if (typeof io === 'undefined') return alert("Error: CDN load failed. Refresh page.");
+            if (!socket) socket = io();
+            if (!socket) return alert("System connecting...");
+            
+            var name = document.getElementById('username').value.trim();
+            if(!name) return;
+            var password = "";
+            if (name.toLowerCase() === 'admin') {
+                password = prompt("🔒 Admin Password:");
+                if (password === null) return;
+            }
+            myName = name;
+            socket.emit('login', {username: myName, password: password});
+        }
+
+        if(socket) {
+            socket.on('login_success', function(data) {
+                document.getElementById('login-screen').style.display = 'none';
+                document.getElementById('main-app').style.display = 'flex';
+                if(myName.toLowerCase() === 'admin') document.getElementById('admin-panel').style.display = 'block';
+                switchChat('ALL', 'Class Group', 'group', document.querySelector('.chat-item[data-id="ALL"]'));
+            });
+
+            socket.on('login_error', function(data) { alert(data.msg); });
+
+            socket.on('update_user_list', function(data) {
+                document.getElementById('group-status').innerText = data.count + " online";
+                var listHtml = "";
+                data.users.forEach(function(user) {
+                    if(user !== myName) {
+                        var color = "#5fb6ad"; 
+                        listHtml += `
+                        <div class="chat-item" data-id="${user}" onclick="switchChat('${user}', '${user}', 'private', this)">
+                            <div class="avatar" style="background:${color}; font-size:14px;">${user[0].toUpperCase()}</div>
+                            <div class="chat-info"><div class="chat-name">${user}</div><div class="chat-meta">Online</div></div>
+                            <div class="badge" id="badge-${user}">0</div>
+                        </div>`;
+                    }
+                });
+                document.getElementById('user-list').innerHTML = listHtml;
+                for(var key in unreadCounts) { updateBadgeUI(key); }
+            });
+
+            socket.on('load_history', function(msgs) {
+                lastSender = null;
+                msgs.forEach(function(msg) { appendMessage(msg); });
+                scrollToBottom();
+            });
+
+            socket.on('new_message', function(msg) {
+                document.getElementById('typing-indicator').style.display = 'none';
+                
+                var msgBelongsTo = ""; 
+                if(msg.room_type === 'group') msgBelongsTo = "ALL";
+                else if(msg.room_type === 'ai') msgBelongsTo = "AI";
+                else if(msg.room_type === 'private') msgBelongsTo = (msg.sender === myName) ? msg.target : msg.sender;
+
+                if(msgBelongsTo === currentTarget) {
+                    appendMessage(msg);
+                    scrollToBottom();
+                } else {
+                    if(!unreadCounts[msgBelongsTo]) unreadCounts[msgBelongsTo] = 0;
+                    unreadCounts[msgBelongsTo]++;
+                    updateBadgeUI(msgBelongsTo);
+                }
+            });
+            
+            socket.on('ai_thinking', function(data) {
+                // 🔴 逻辑修正：只在正确的窗口显示
+                var isForMe = false;
+                if(currentRoomType === 'group' && data.room_type === 'group') isForMe = true;
+                if(currentRoomType === 'ai' && data.room_type === 'ai') isForMe = true;
+                if(isForMe) {
+                    document.getElementById('typing-indicator').style.display = 'flex';
+                    scrollToBottom();
+                }
+            });
+
+            socket.on('system_notification', function(data) {
+                alert(data.msg);
+                document.getElementById('msg-container').innerHTML = "";
+            });
+        }
+
+        function switchChat(target, title, type, element) {
+            currentTarget = target;
+            currentRoomType = type;
+            document.getElementById('chat-title').innerText = title;
+            document.getElementById('msg-container').innerHTML = "";
+            document.getElementById('typing-indicator').style.display = 'none';
+            lastSender = null;
+
+            var input = document.getElementById('msg-input');
+            if(type === 'group') input.placeholder = "Type @AI to chat...";
+            else if (type === 'ai') input.placeholder = "Ask DeepSeek...";
+            else input.placeholder = "Type message...";
+
+            document.querySelectorAll('.chat-item').forEach(function(el) { el.classList.remove('active'); });
+            if(element) element.classList.add('active');
+            unreadCounts[target] = 0;
+            updateBadgeUI(target);
+            if(window.innerWidth <= 768) document.getElementById('sidebar').classList.add('hidden');
+            socket.emit('switch_chat', {username: myName, target: target, room_type: type});
+        }
+        
+        function showSidebar() { document.getElementById('sidebar').classList.remove('hidden'); }
+        function updateBadgeUI(target) {
+            var el = document.getElementById('badge-' + target);
+            if(el) {
+                el.innerText = unreadCounts[target] || 0;
+                el.classList.toggle('show', (unreadCounts[target] || 0) > 0);
+            }
+        }
+        function sendMessage() {
+            var input = document.getElementById('msg-input');
+            var text = input.value.trim();
+            if(!text) return;
+            socket.emit('send_message', {sender: myName, target: currentTarget, msg: text, color: myColor, room_type: currentRoomType});
+            input.value = "";
+            picker.classList.remove('show');
+        }
+        document.getElementById('msg-input').addEventListener("keypress", function(e) { if(e.key === "Enter") sendMessage(); });
+        function resetSystem() { if(confirm("Clear All History?")) socket.emit('reset_system', {username: myName}); }
+        
+        function appendMessage(data) {
+            var isMe = (data.sender === myName);
+            var isAI = (data.sender === "AI Assistant");
+            var isChain = (lastSender === data.sender);
+            lastSender = data.sender;
+
+            var rowCls = isMe ? "me" : "other";
+            var bubbleCls = isMe ? "me" : (isAI ? "ai" : "other");
+            
+            if (isChain) { rowCls += " chain-same"; } 
+            else { rowCls += " chain-start"; }
+
+            var avatarHtml = "";
+            if (!isMe) {
+                var initial = isAI ? "🤖" : data.sender[0].toUpperCase();
+                var bg = isAI ? "#ff885e" : (data.avatar_color || "#ccc");
+                var visibilityClass = isChain ? "hidden" : "";
+                avatarHtml = `<div class="msg-avatar ${visibilityClass}" style="background:${bg};">${initial}</div>`;
+            }
+
+            var nameHtml = "";
+            if (!isMe && !isChain) {
+                nameHtml = `<span class="sender-name" style="color:${isAI?'#3390ec':data.avatar_color}">${data.sender}</span>`;
+            }
+
+            var msgContent = data.msg;
+            try {
+                if (isAI && typeof marked !== 'undefined') {
+                    msgContent = marked.parse(msgContent);
+                } else {
+                    msgContent = msgContent.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br>");
+                }
+            } catch(e) {}
+
+            var html = `
+            <div class="msg-row ${rowCls}">
+                ${avatarHtml}
+                <div class="bubble ${bubbleCls}">
+                    ${nameHtml}
+                    <span style="display:inline;">${msgContent}</span>
+                    <span class="msg-time">${data.time}</span>
+                </div>
+            </div>`;
+            
+            var container = document.getElementById('msg-container');
+            container.insertAdjacentHTML('beforeend', html);
+            
+            if (isAI && typeof hljs !== 'undefined') {
+                container.querySelectorAll('pre code').forEach(function(block) {
+                    hljs.highlightElement(block);
+                });
+            }
+        }
+        
+        function scrollToBottom() { var b=document.getElementById('msg-container'); b.scrollTop=b.scrollHeight; }
+    </script>
+</body>
+</html>
